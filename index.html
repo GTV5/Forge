@@ -715,14 +715,14 @@ async function login(){
 }
 
 function cleanBadData(){
-  // Remove exercise data that has no real sets entered
-  // Real data = weight > 1 and reps > 0, or reps > 1 for bodyweight
+  // Only remove exercise data where ALL sets are zeros
+  // Don't touch partial entries - user may still be filling them in
   let cleaned=false;
   Object.keys(logData).forEach(exId=>{
     const v=logData[exId];
     if(!v||!v.sets)return;
-    const hasRealData=v.sets.some(s=>(s.w>1&&s.r>0)||(s.r>1));
-    if(!hasRealData){
+    const allZero=v.sets.every(s=>(s.w||0)===0&&(s.r||0)===0);
+    if(allZero){
       delete logData[exId];
       cleaned=true;
     }
@@ -826,7 +826,7 @@ async function loadCloud(){
     weekRows.forEach(r=>{
       const cloudSets=r.sets||[];
       // Only restore sets with real data (not zeros or 1s)
-      const realSets=cloudSets.filter(s=>(s.w>1&&s.r>0)||(s.r>1));
+      const realSets=cloudSets.filter(s=>(s.w>0&&s.r>0)||(s.r>0));
       if(realSets.length>0){
         if(!logData[r.exercise_id])logData[r.exercise_id]={};
         logData[r.exercise_id].sets=cloudSets;
@@ -875,9 +875,9 @@ async function testConnection(){
 
 async function doSync(){
   if(!WHO||!plan)return;
-  // Only sync if there's real data to save - prevents phantom saves
+  // Only sync if there's at least one set with real data
   const hasRealData=Object.values(logData).some(v=>
-    v&&v.sets&&v.sets.some(s=>(s.w>1&&s.r>0)||(s.r>1))
+    v&&v.sets&&v.sets.some(s=>(s.w>0&&s.r>0)||(s.r>0))
   );
   if(!hasRealData){
     console.log('doSync skipped - no real data to save');
@@ -1245,28 +1245,29 @@ function restoreInputs(){
 }
 
 function onInp(did,exId,n,type){
-  // Get existing sets from logData as base
-  const existing=logData[exId]?.sets||[];
-  const sets=[];
+  // Initialize sets array from existing data first
+  if(!logData[exId])logData[exId]={sets:[]};
+  if(!logData[exId].sets||logData[exId].sets.length!==n){
+    // Initialize with zeros for all sets
+    logData[exId].sets=Array.from({length:n},(_,i)=>
+      type==='w'?{w:0,r:0}:{r:0}
+    );
+  }
+  
+  // Now read ALL inputs from DOM and merge with existing saved values
   for(let i=0;i<n;i++){
     if(type==='w'){
       const wEl=document.getElementById('i-'+exId+'-'+i+'-w');
       const rEl=document.getElementById('i-'+exId+'-'+i+'-r');
-      // Use DOM value if available, else keep existing saved value
-      const wDom=wEl&&wEl.value!==''?parseFloat(wEl.value):null;
-      const rDom=rEl&&rEl.value!==''?parseInt(rEl.value):null;
-      const w=wDom!==null?wDom:(existing[i]?.w||0);
-      const r=rDom!==null?rDom:(existing[i]?.r||0);
-      sets.push({w,r});
+      // Only update if input has a value - keep existing if empty
+      if(wEl&&wEl.value!=='')logData[exId].sets[i].w=parseFloat(wEl.value)||0;
+      if(rEl&&rEl.value!=='')logData[exId].sets[i].r=parseInt(rEl.value)||0;
     } else {
       const rEl=document.getElementById('i-'+exId+'-'+i+'-r');
-      const rDom=rEl&&rEl.value!==''?parseInt(rEl.value):null;
-      const r=rDom!==null?rDom:(existing[i]?.r||0);
-      sets.push({r});
+      if(rEl&&rEl.value!=='')logData[exId].sets[i].r=parseInt(rEl.value)||0;
     }
   }
-  if(!logData[exId])logData[exId]={};
-  logData[exId].sets=sets;
+  
   // Save to localStorage IMMEDIATELY
   saveDraft();
   setSyncStatus('local');
