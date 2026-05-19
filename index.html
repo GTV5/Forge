@@ -702,7 +702,13 @@ async function login(){
   }
 }
 
-function doLogout(){WHO=null;plan=null;planKey=null;week=1;logData={};calcs={};prs={};completedDays={};flexDays={};skippedEx={};swappedEx={};nav('pg-login');}
+function doLogout(){
+  captureAllInputs();
+  saveDraft();
+  doSync();
+  WHO=null;plan=null;planKey=null;week=1;logData={};calcs={};prs={};completedDays={};flexDays={};skippedEx={};swappedEx={};
+  nav('pg-login');
+}
 
 function changePlan(){
   if(confirm('Switch plan? Your workout history is kept.')){
@@ -731,6 +737,7 @@ function nav(id){
 }
 
 function switchTab(t){
+  captureAllInputs();
   ['log','boo','charts','records','builder'].forEach(x=>{
     document.getElementById('tab-'+x).classList.toggle('on',x===t);
     document.getElementById('bn-'+x).classList.toggle('on',x===t);
@@ -837,10 +844,12 @@ async function doSync(){
         const actualEx=swappedEx[ex.id]?{...swappedEx[ex.id],id:ex.id}:ex;
         const ld=logData[ex.id];
         if(!ld||!ld.sets)return;
-        const hasSets=actualEx.type==='w'
-          ?ld.sets.some(s=>s.w>0&&s.r>0)
-          :ld.sets.some(s=>s.r>0);
-        if(!hasSets)return;
+        // Filter out empty sets before saving
+        const cleanSets=actualEx.type==='w'
+          ?ld.sets.filter(s=>s.w>0&&s.r>0)
+          :ld.sets.filter(s=>s.r>0);
+        if(!cleanSets.length)return;
+        ld.sets=cleanSets;
         const row={
           user_id:WHO,
           week:week,
@@ -1014,9 +1023,12 @@ function showWorkout(autoSwitch){
 // WORKOUT
 // ============================================================
 function renderWorkout(autoSwitch){
+  // Step 1: capture ALL current input values into logData BEFORE rebuilding DOM
+  captureAllInputs();
   document.getElementById('wk-num').textContent='WEEK '+week;
   buildDayTabs();
   buildDayPanels();
+  // Step 2: restore all values back into new DOM
   restoreInputs();
   renderCompleteDayBtns();
   renderSwapSkipBtns();
@@ -1024,11 +1036,45 @@ function renderWorkout(autoSwitch){
   if(autoSwitch){
     autoSwitchDay();
   } else {
-    // Restore previously active day — don't reset to day 1
     const idx=Math.min(activeDayIdx,plan.days.length-1);
     document.querySelectorAll('.dt').forEach((t,j)=>t.classList.toggle('on',j===idx));
     document.querySelectorAll('.dpanel').forEach((p,j)=>p.classList.toggle('on',j===idx));
   }
+}
+
+function captureAllInputs(){
+  if(!plan)return;
+  plan.days.forEach(day=>{
+    const flexed=flexDays[day.id];
+    const exList=flexed?flexed.ex:day.ex;
+    exList.forEach(ex=>{
+      const actualEx=swappedEx[ex.id]?{...swappedEx[ex.id],id:ex.id}:ex;
+      const existing=logData[ex.id]?.sets||[];
+      const sets=[];
+      let hasAnyData=false;
+      for(let i=0;i<actualEx.sets;i++){
+        if(actualEx.type==='w'){
+          const wEl=document.getElementById('i-'+ex.id+'-'+i+'-w');
+          const rEl=document.getElementById('i-'+ex.id+'-'+i+'-r');
+          const w=wEl&&wEl.value!==''?parseFloat(wEl.value):(existing[i]?.w||0);
+          const r=rEl&&rEl.value!==''?parseInt(rEl.value):(existing[i]?.r||0);
+          sets.push({w,r});
+          if(w>0||r>0)hasAnyData=true;
+        } else {
+          const rEl=document.getElementById('i-'+ex.id+'-'+i+'-r');
+          const r=rEl&&rEl.value!==''?parseInt(rEl.value):(existing[i]?.r||0);
+          sets.push({r});
+          if(r>0)hasAnyData=true;
+        }
+      }
+      if(hasAnyData){
+        if(!logData[ex.id])logData[ex.id]={};
+        logData[ex.id].sets=sets;
+      }
+    });
+  });
+  // Save captured data to localStorage
+  saveDraft();
 }
 
 function autoSwitchDay(){
@@ -1145,20 +1191,23 @@ function restoreInputs(){
 }
 
 function onInp(did,exId,n,type){
-  // Get existing sets from logData as base (preserves data from other sets)
+  // Get existing sets from logData as base
   const existing=logData[exId]?.sets||[];
   const sets=[];
   for(let i=0;i<n;i++){
     if(type==='w'){
       const wEl=document.getElementById('i-'+exId+'-'+i+'-w');
       const rEl=document.getElementById('i-'+exId+'-'+i+'-r');
-      // Use DOM value if input exists, otherwise keep existing saved value
-      const w=wEl?(parseFloat(wEl.value)||0):(existing[i]?.w||0);
-      const r=rEl?(parseInt(rEl.value)||0):(existing[i]?.r||0);
+      // Use DOM value if available, else keep existing saved value
+      const wDom=wEl&&wEl.value!==''?parseFloat(wEl.value):null;
+      const rDom=rEl&&rEl.value!==''?parseInt(rEl.value):null;
+      const w=wDom!==null?wDom:(existing[i]?.w||0);
+      const r=rDom!==null?rDom:(existing[i]?.r||0);
       sets.push({w,r});
     } else {
       const rEl=document.getElementById('i-'+exId+'-'+i+'-r');
-      const r=rEl?(parseInt(rEl.value)||0):(existing[i]?.r||0);
+      const rDom=rEl&&rEl.value!==''?parseInt(rEl.value):null;
+      const r=rDom!==null?rDom:(existing[i]?.r||0);
       sets.push({r});
     }
   }
@@ -1235,6 +1284,8 @@ function updateProg(did,exId,n,type){
 }
 
 function switchDay(i){
+  captureAllInputs();
+  activeDayIdx=i;
   document.querySelectorAll('.dt').forEach((t,j)=>t.classList.toggle('on',j===i));
   document.querySelectorAll('.dpanel').forEach((p,j)=>p.classList.toggle('on',j===i));
   renderCompleteDayBtns();
@@ -1247,6 +1298,7 @@ function toggleExc(id){document.getElementById('exc-'+id).classList.toggle('open
 // CALCULATIONS
 // ============================================================
 function calcEx(exId,n,type){
+  captureAllInputs();
   const el=document.getElementById('res-'+exId);
   if(type==='bw'){calcBW(exId,n,el);return;}
   let sets=[];
@@ -1318,6 +1370,7 @@ function calcBW(exId,n,el){
 }
 
 function calcSession(did){
+  captureAllInputs();
   const day=plan.days.find(d=>d.id===did);if(!day)return;
   day.ex.forEach(ex=>calcEx(ex.id,ex.sets,ex.type));
   let count=0,vol=0,sets=0,rows='';
@@ -2326,6 +2379,12 @@ function renderCompleteDayBtns(){
     panel.appendChild(wrap);
   });
 }
+
+// Save data when app is closed or navigated away
+window.addEventListener('pagehide',()=>{captureAllInputs();saveDraft();});
+window.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden'){captureAllInputs();saveDraft();}
+});
 
 // ============================================================
 // FLEX DAY
