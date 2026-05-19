@@ -882,12 +882,9 @@ async function testConnection(){
 
 async function doSync(){
   if(!WHO||!plan)return;
-  // Only sync if there's at least one set with real data
-  const hasRealData=Object.values(logData).some(v=>
-    v&&v.sets&&v.sets.some(s=>(s.w>0&&s.r>0)||(s.r>0))
-  );
-  if(!hasRealData){
-    console.log('doSync skipped - no real data to save');
+  // Only skip sync if logData is completely empty
+  if(!Object.keys(logData).length){
+    console.log('doSync skipped - logData empty');
     return;
   }
   setSyncStatus('saving');
@@ -904,12 +901,8 @@ async function doSync(){
         const actualEx=swappedEx[ex.id]?{...swappedEx[ex.id],id:ex.id}:ex;
         const ld=logData[ex.id];
         if(!ld||!ld.sets)return;
-        // Only remove sets where both weight AND reps are zero
-        const cleanSets=actualEx.type==='w'
-          ?ld.sets.filter(s=>s.w>0||s.r>0)
-          :ld.sets.filter(s=>s.r>0);
-        if(!cleanSets.length)return;
-        ld.sets=cleanSets;
+        // Save ALL sets exactly as entered - no filtering
+        if(!ld.sets.length)return;
         const row={
           user_id:WHO,
           week:week,
