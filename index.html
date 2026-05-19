@@ -2080,6 +2080,8 @@ function renderBStep3(el){
 
 async function bSaveAndLoad(){
   if(!WHO){alert('Please log in first before saving a plan.');return;}
+  if(!bWeekPlan.some(d=>d.exercises.length>0)){alert('Add exercises to at least one day first.');return;}
+
   const customPlan={
     name:'MY CUSTOM PLAN',
     sub:bNumDays+'-DAY CUSTOM',
@@ -2095,22 +2097,53 @@ async function bSaveAndLoad(){
       }))
     }))
   };
-  // Save to PLANS object
+
+  // 1. Save to memory
   PLANS['custom']=customPlan;
-  // Save custom plan to Supabase so it persists
-  await fetch(SB_URL+'/rest/v1/plans?on_conflict=user_id',{
-    method:'POST',
-    headers:{...HDR,'Prefer':'resolution=merge-duplicates,return=minimal'},
-    body:JSON.stringify({
-      user_id:WHO,
-      plan_key:'custom',
-      plan_data:{planKey:'custom',week,prs,completedDays,flexDays,skippedEx,swappedEx,customPlan},
-      updated_at:new Date().toISOString()
-    })
-  });
   planKey='custom';
   plan=PLANS['custom'];
-  showWorkout();
+
+  // 2. Save to localStorage immediately - most reliable
+  try{
+    localStorage.setItem('forge_custom_plan_'+WHO, JSON.stringify(customPlan));
+    console.log('Custom plan saved to localStorage for',WHO);
+  }catch(e){console.error('localStorage error:',e);}
+
+  // 3. Save plan choice
+  savePlanChoice();
+
+  // 4. Save full draft
+  saveDraft();
+
+  // 5. Save to Supabase
+  let cloudOk=false;
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/plans?on_conflict=user_id',{
+      method:'POST',
+      headers:{...HDR,'Prefer':'resolution=merge-duplicates,return=minimal'},
+      body:JSON.stringify({
+        user_id:WHO,
+        plan_key:'custom',
+        plan_data:{planKey:'custom',week,prs,completedDays,flexDays,skippedEx,swappedEx,customPlan},
+        updated_at:new Date().toISOString()
+      })
+    });
+    cloudOk=r.ok;
+    if(!r.ok){const t=await r.text();console.error('Supabase error:',t);}
+  }catch(e){console.error('Fetch error:',e);}
+
+  // 6. Show result
+  if(cloudOk){
+    alert('CUSTOM PLAN SAVED! ✓
+
+It will load automatically every time '+WHO.toUpperCase()+' logs in.');
+  } else {
+    alert('CUSTOM PLAN SAVED TO THIS DEVICE ✓
+
+Cloud sync failed but your plan is saved locally and will load on this device. Try again later for cloud backup.');
+  }
+
+  showWorkout(true);
   switchTab('log');
 }
 
