@@ -690,24 +690,21 @@ async function login(){
   document.getElementById('user-pill').textContent=WHO.toUpperCase();
   nav('pg-app');
 
-  // Step 1: load plan choice
+  // Step 1: load plan choice only (not full draft)
   loadPlanChoice();
 
-  // Step 2: load full draft data
-  loadDraft();
+  // Step 2: clear all input data - cloud is the source of truth
+  logData={};calcs={};completedDays={};flexDays={};skippedEx={};swappedEx={};
 
-  // Step 3: clean bad data from localStorage
-  cleanBadData();
-
-  // Step 4: show immediately
+  // Step 3: show plan immediately with empty inputs
   if(!plan){planKey='3day';plan=PLANS['3day'];}
   showWorkout(true);
 
-  // Step 5: load from cloud - authoritative source
+  // Step 4: load everything from cloud
   try{
     await loadCloud();
   }catch(e){
-    console.log('Cloud unavailable:',e.message);
+    console.log('Cloud unavailable - starting fresh');
   }
 }
 
