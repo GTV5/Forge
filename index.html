@@ -694,11 +694,18 @@ async function login(){
   if(!plan){planKey='3day';plan=PLANS['3day'];}
   showWorkout(true);
 
-  // Step 4: sync from cloud in background - won't change the plan
+  // Step 4: test connection then sync from cloud
   try{
-    await loadCloud();
+    const connected=await testConnection();
+    console.log('Supabase connected:',connected);
+    if(connected){
+      await loadCloud();
+    } else {
+      console.warn('Supabase unreachable - using local data only');
+      setSyncStatus('error');
+    }
   }catch(e){
-    console.log('Cloud unavailable, using local data');
+    console.log('Cloud unavailable:',e.message);
   }
 }
 
@@ -828,6 +835,20 @@ async function loadCloud(){
 
 function queueSync(){clearTimeout(syncT);syncT=setTimeout(doSync,800);}
 async function syncNow(){clearTimeout(syncT);await doSync();}
+async function testConnection(){
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/plans?limit=1',{
+      headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}
+    });
+    console.log('Connection test - status:',r.status,'ok:',r.ok);
+    if(!r.ok){const t=await r.text();console.error('Connection test failed:',t);}
+    return r.ok;
+  }catch(e){
+    console.error('Connection test exception:',e.message);
+    return false;
+  }
+}
+
 async function doSync(){
   if(!WHO||!plan)return;
   setSyncStatus('saving');
@@ -1455,9 +1476,12 @@ async function completeDay(dayId, dayName){
           logged_at:timestamp
         })
       }).then(r=>{
-        if(!r.ok)r.text().then(t=>console.error('Failed to save',actualEx.name,':',t));
-        else console.log('Saved',actualEx.name,'OK');
+        if(!r.ok)r.text().then(t=>console.error('Failed to save',actualEx.name,'status:',r.status,'body:',t));
+        else console.log('Saved',actualEx.name,'OK status:',r.status);
         return r.ok;
+      }).catch(e=>{
+        console.error('Network error saving',actualEx.name,':',e.message,'URL:',fetchUrl);
+        return false;
       })
     );
   });
