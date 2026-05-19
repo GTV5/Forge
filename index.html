@@ -764,15 +764,22 @@ async function loadCloud(){
       if(pd.customPlan){
         PLANS['custom']=pd.customPlan;
       }
-      if(pd.planKey){
-        planKey=pd.planKey;
-        plan=PLANS[planKey]||null;
-      }
+      // Restore week number from cloud
+      if(pd.week)week=pd.week;
+      // Restore prs, completedDays etc
       if(pd.prs)prs=pd.prs;
       if(pd.completedDays)completedDays=pd.completedDays;
       if(pd.flexDays)flexDays=pd.flexDays;
       if(pd.skippedEx)skippedEx=pd.skippedEx;
       if(pd.swappedEx)swappedEx=pd.swappedEx;
+      // Only restore plan from cloud if we have no local plan saved
+      const localChoice=localStorage.getItem('forge_plan_'+WHO);
+      if(!localChoice&&pd.planKey){
+        if(pd.customPlan)PLANS['custom']=pd.customPlan;
+        planKey=pd.planKey;
+        plan=PLANS[planKey]||PLANS['3day'];
+        savePlanChoice();
+      }
     }
     // Load current week workout data - MERGE with local, don't overwrite
     const weekRows=rows.filter(r=>r.week===week);
@@ -1736,26 +1743,33 @@ function getName(id){if(!plan)return id;for(const d of plan.days){const e=d.ex.f
 
 // Save and load the user's plan choice - dedicated persistent storage
 function savePlanChoice(){
-  if(!WHO||!planKey)return;
+  if(!WHO||!planKey){
+    console.warn('savePlanChoice skipped - WHO:',WHO,'planKey:',planKey);
+    return;
+  }
   try{
     const data={planKey};
     if(planKey==='custom'&&PLANS['custom'])data.customPlan=PLANS['custom'];
     localStorage.setItem('forge_plan_'+WHO, JSON.stringify(data));
-  }catch(e){}
+    console.log('Plan choice saved for',WHO,':',planKey);
+  }catch(e){console.error('savePlanChoice error:',e);}
 }
 
 function loadPlanChoice(){
   try{
-    const d=localStorage.getItem('forge_plan_'+WHO);
+    const key='forge_plan_'+WHO;
+    const d=localStorage.getItem(key);
+    console.log('loadPlanChoice for',WHO,'- found:',!!d);
     if(!d)return false;
     const p=JSON.parse(d);
     if(p.customPlan)PLANS['custom']=p.customPlan;
     if(p.planKey&&(PLANS[p.planKey]||p.customPlan)){
       planKey=p.planKey;
       plan=PLANS[planKey];
+      console.log('Plan loaded:',planKey,'for',WHO);
       return true;
     }
-  }catch(e){}
+  }catch(e){console.error('loadPlanChoice error:',e);}
   return false;
 }
 
@@ -2065,6 +2079,7 @@ function renderBStep3(el){
 }
 
 async function bSaveAndLoad(){
+  if(!WHO){alert('Please log in first before saving a plan.');return;}
   const customPlan={
     name:'MY CUSTOM PLAN',
     sub:bNumDays+'-DAY CUSTOM',
