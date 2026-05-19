@@ -690,29 +690,41 @@ async function login(){
   document.getElementById('user-pill').textContent=WHO.toUpperCase();
   nav('pg-app');
 
-  // Step 1: load plan choice - this is the most important thing
-  const hadPlan=loadPlanChoice();
+  // Step 1: load plan choice
+  loadPlanChoice();
 
-  // Step 2: load full draft data (sets, calcs, etc)
+  // Step 2: load full draft data
   loadDraft();
 
-  // Step 3: show immediately with whatever we have
+  // Step 3: clean bad data from localStorage
+  cleanBadData();
+
+  // Step 4: show immediately
   if(!plan){planKey='3day';plan=PLANS['3day'];}
   showWorkout(true);
 
-  // Step 4: test connection then sync from cloud
+  // Step 5: load from cloud - authoritative source
   try{
-    const connected=await testConnection();
-    console.log('Supabase connected:',connected);
-    if(connected){
-      await loadCloud();
-    } else {
-      console.warn('Supabase unreachable - using local data only');
-      setSyncStatus('error');
-    }
+    await loadCloud();
   }catch(e){
     console.log('Cloud unavailable:',e.message);
   }
+}
+
+function cleanBadData(){
+  // Remove exercise data that has no real sets entered
+  // Real data = weight > 1 and reps > 0, or reps > 1 for bodyweight
+  let cleaned=false;
+  Object.keys(logData).forEach(exId=>{
+    const v=logData[exId];
+    if(!v||!v.sets)return;
+    const hasRealData=v.sets.some(s=>(s.w>1&&s.r>0)||(s.r>1));
+    if(!hasRealData){
+      delete logData[exId];
+      cleaned=true;
+    }
+  });
+  if(cleaned)saveDraft();
 }
 
 function doLogout(){
@@ -788,7 +800,9 @@ async function loadCloud(){
       if(pd.week)week=pd.week;
       // Restore prs, completedDays etc
       if(pd.prs)prs=pd.prs;
-      if(pd.completedDays)completedDays=pd.completedDays;
+      // Only restore completedDays if they're for the current week
+      if(pd.completedDays&&pd.week===week)completedDays=pd.completedDays;
+      else completedDays={};
       if(pd.flexDays)flexDays=pd.flexDays;
       if(pd.skippedEx)skippedEx=pd.skippedEx;
       if(pd.swappedEx)swappedEx=pd.swappedEx;
@@ -801,24 +815,25 @@ async function loadCloud(){
         savePlanChoice();
       }
     }
-    // Load current week workout data - MERGE with local, don't overwrite
-    const weekRows=rows.filter(r=>r.week===week);
+    // Load ONLY current week workout data - strict week filter
+    // Clear logData first so previous week data doesn't bleed in
+    logData={};calcs={};
+    const weekRows=rows.filter(r=>Number(r.week)===Number(week));
+    console.log('Loading week',week,'- found',weekRows.length,'rows from cloud');
     weekRows.forEach(r=>{
-      // Only update from cloud if local data is empty for this exercise
-      const localSets=logData[r.exercise_id]?.sets;
-      const cloudSets=r.sets;
-      const localHasData=localSets&&localSets.some(s=>s.w>0||s.r>0);
-      const cloudHasData=cloudSets&&cloudSets.some(s=>(s.w||0)>0||(s.r||0)>0);
-      if(cloudHasData&&!localHasData){
+      const cloudSets=r.sets||[];
+      // Only restore sets with real data (not zeros or 1s)
+      const realSets=cloudSets.filter(s=>(s.w>1&&s.r>0)||(s.r>1));
+      if(realSets.length>0){
         if(!logData[r.exercise_id])logData[r.exercise_id]={};
-        logData[r.exercise_id].sets=r.sets;
+        logData[r.exercise_id].sets=cloudSets;
       }
       // Always take cloud calc results
       if(r.calc_result)calcs[r.exercise_id]=r.calc_result;
     });
     // Load last week's calc results for weight suggestions
     window._lastWeekCalcs={};
-    rows.filter(r=>r.week===(week-1)&&r.calc_result).forEach(r=>{
+    rows.filter(r=>Number(r.week)===(Number(week)-1)&&r.calc_result).forEach(r=>{
       window._lastWeekCalcs[r.exercise_id]=r.calc_result;
     });
     document.getElementById('wk-num').textContent='WEEK '+week;
@@ -1288,7 +1303,9 @@ function loadDraft(){
         if(!PLANS[planKey])planKey='3day';
       }
     }
-    if(p.completedDays)completedDays=p.completedDays;
+    // Only restore completedDays if week matches
+    if(p.completedDays&&p.week===week)completedDays=p.completedDays;
+    else completedDays={};
     if(p.flexDays)flexDays=p.flexDays;
     if(p.skippedEx)skippedEx=p.skippedEx;
     if(p.swappedEx)swappedEx=p.swappedEx;
