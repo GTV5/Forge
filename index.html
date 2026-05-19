@@ -690,21 +690,27 @@ async function login(){
   document.getElementById('user-pill').textContent=WHO.toUpperCase();
   nav('pg-app');
 
-  // Step 1: load plan choice only (not full draft)
+  // Step 1: load plan choice
   loadPlanChoice();
 
-  // Step 2: clear all input data - cloud is the source of truth
+  // Step 2: clear all input data
   logData={};calcs={};completedDays={};flexDays={};skippedEx={};swappedEx={};
 
   // Step 3: show plan immediately with empty inputs
   if(!plan){planKey='3day';plan=PLANS['3day'];}
   showWorkout(true);
 
-  // Step 4: load everything from cloud
+  // Step 4: try cloud first - it's the source of truth
   try{
     await loadCloud();
   }catch(e){
-    console.log('Cloud unavailable - starting fresh');
+    // Step 5: cloud failed - fall back to localStorage
+    console.log('Cloud unavailable - loading from local backup');
+    loadDraft();
+    cleanBadData();
+    // Only use local data if it matches current week
+    if(plan)showWorkout(false);
+    setSyncStatus('error');
   }
 }
 
@@ -869,6 +875,14 @@ async function testConnection(){
 
 async function doSync(){
   if(!WHO||!plan)return;
+  // Only sync if there's real data to save - prevents phantom saves
+  const hasRealData=Object.values(logData).some(v=>
+    v&&v.sets&&v.sets.some(s=>(s.w>1&&s.r>0)||(s.r>1))
+  );
+  if(!hasRealData){
+    console.log('doSync skipped - no real data to save');
+    return;
+  }
   setSyncStatus('saving');
   try{
     // Save each exercise row individually to avoid bulk upsert issues
@@ -1050,7 +1064,7 @@ function pickPlan(k){
   planKey=k;plan=PLANS[k];
   savePlanChoice();
   showWorkout(true);
-  queueSync();
+  // Don't auto-sync on plan pick - only sync when user enters data
 }
 
 function showWorkout(autoSwitch){
