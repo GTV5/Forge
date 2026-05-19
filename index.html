@@ -1033,10 +1033,11 @@ function renderWorkout(autoSwitch){
   renderCompleteDayBtns();
   renderSwapSkipBtns();
   document.getElementById('sum-wrap').innerHTML='';
+  // Always restore active day - autoSwitch only on first login
   if(autoSwitch){
     autoSwitchDay();
   } else {
-    const idx=Math.min(activeDayIdx,plan.days.length-1);
+    const idx=Math.min(activeDayIdx||0, plan.days.length-1);
     document.querySelectorAll('.dt').forEach((t,j)=>t.classList.toggle('on',j===idx));
     document.querySelectorAll('.dpanel').forEach((p,j)=>p.classList.toggle('on',j===idx));
   }
@@ -1089,7 +1090,7 @@ function autoSwitchDay(){
 
 function buildDayTabs(){
   document.getElementById('dtabs').innerHTML=plan.days.map((d,i)=>`
-    <div class="dt ${i===0?'on':''}" id="dt-${d.id}" onclick="switchDay(${i})">
+    <div class="dt" id="dt-${d.id}" onclick="switchDay(${i})">
       ${flexDays[d.id]?'🔄 '+flexDays[d.id].name:d.label+': '+d.name}
       <div class="dt-dot ${dayDone(d.id)?'show':''}" id="dtdot-${d.id}"></div>
     </div>`).join('');
@@ -1107,7 +1108,7 @@ function buildDayPanels(){
     const dname=flexed?('🔄 '+flexed.name):d.name;
     const dfocus=flexed?flexed.focus:d.focus;
     const exCards=ex.map((e,ei)=>buildExCard(e,ei,d)).join('');
-    return '<div class="dpanel '+(i===0?'on':'')+'" id="dp-'+d.id+'">'+
+    return '<div class="dpanel" id="dp-'+d.id+'">'+
       '<div class="dhead" style="flex-wrap:wrap;gap:8px">'+
         '<div class="dhead-num">'+d.label+'</div>'+
         '<div style="flex:1">'+
@@ -2524,7 +2525,7 @@ function confirmFlex(){
   document.getElementById('flex-overlay').classList.remove('show');
   flexCurrentDay=null;flexSelectedGroup=null;
   // Re-render
-  renderWorkout();
+  renderWorkout(false);
 }
 
 // Override buildDayPanels to use flex exercises when set
