@@ -904,9 +904,9 @@ async function doSync(){
         const actualEx=swappedEx[ex.id]?{...swappedEx[ex.id],id:ex.id}:ex;
         const ld=logData[ex.id];
         if(!ld||!ld.sets)return;
-        // Filter out empty sets before saving
+        // Only remove sets where both weight AND reps are zero
         const cleanSets=actualEx.type==='w'
-          ?ld.sets.filter(s=>s.w>0&&s.r>0)
+          ?ld.sets.filter(s=>s.w>0||s.r>0)
           :ld.sets.filter(s=>s.r>0);
         if(!cleanSets.length)return;
         ld.sets=cleanSets;
