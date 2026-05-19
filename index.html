@@ -607,9 +607,15 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const HDR={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json'};
 
 async function dbGet(table,filters={}){
-  let url=SB_URL+'/rest/v1/'+table+'?order=logged_at.desc';
+  // plans uses updated_at, workouts uses logged_at
+  const orderCol=table==='plans'?'updated_at':'logged_at';
+  let url=SB_URL+'/rest/v1/'+table+'?order='+orderCol+'.desc';
   Object.entries(filters).forEach(([k,v])=>url+='&'+k+'=eq.'+encodeURIComponent(v));
-  try{const r=await fetch(url,{headers:HDR});return r.ok?await r.json():[];}catch(e){return[];}
+  try{
+    const r=await fetch(url,{headers:HDR});
+    if(!r.ok){const t=await r.text();console.error('dbGet error',table,r.status,t);return[];}
+    return await r.json();
+  }catch(e){console.error('dbGet exception',table,e.message);return[];}
 }
 async function dbUpsert(table,data,conflictCols){
   try{
