@@ -683,17 +683,18 @@ async function login(){
   setTheme(WHO);
   document.getElementById('user-pill').textContent=WHO.toUpperCase();
   nav('pg-app');
-  // Step 1: load local draft instantly so something shows
+
+  // Step 1: load plan choice - this is the most important thing
+  const hadPlan=loadPlanChoice();
+
+  // Step 2: load full draft data (sets, calcs, etc)
   loadDraft();
-  // Step 2: if we have a plan from draft, show it immediately
-  if(plan){
-    showWorkout(true);
-  } else {
-    // Default to 3day while cloud loads
-    planKey='3day';plan=PLANS['3day'];
-    showWorkout(true);
-  }
-  // Step 3: load from cloud - may override with user's actual saved plan
+
+  // Step 3: show immediately with whatever we have
+  if(!plan){planKey='3day';plan=PLANS['3day'];}
+  showWorkout(true);
+
+  // Step 4: sync from cloud in background - won't change the plan
   try{
     await loadCloud();
   }catch(e){
@@ -992,6 +993,7 @@ function buildPlanPicker(){
 
 function pickPlan(k){
   planKey=k;plan=PLANS[k];
+  savePlanChoice();
   showWorkout(true);
   queueSync();
 }
@@ -1173,24 +1175,39 @@ function saveDraft(){
 
 function loadDraft(){
   try{
+    // First check for dedicated custom plan save
+    const customPlanSaved=localStorage.getItem('forge_custom_plan_'+WHO);
+    if(customPlanSaved){
+      try{
+        PLANS['custom']=JSON.parse(customPlanSaved);
+        console.log('Custom plan restored from localStorage');
+      }catch(e){}
+    }
+
     const key='forge_draft_'+WHO;
     const d=localStorage.getItem(key);
     if(!d)return false;
     const p=JSON.parse(d);
-    // Always restore logData - this is the most important thing
     if(p.logData)logData=p.logData;
     if(p.calcs)calcs=p.calcs;
     if(p.prs)prs=p.prs;
     if(p.week)week=p.week;
+    // Restore custom plan from draft too
+    if(p.customPlan)PLANS['custom']=p.customPlan;
+    // Restore planKey - if custom, make sure plan exists
     if(p.planKey){
       planKey=p.planKey;
-      plan=PLANS[planKey]||PLANS['3day'];
+      if(planKey==='custom'&&PLANS['custom']){
+        plan=PLANS['custom'];
+      } else {
+        plan=PLANS[planKey]||PLANS['3day'];
+        if(!PLANS[planKey])planKey='3day';
+      }
     }
     if(p.completedDays)completedDays=p.completedDays;
     if(p.flexDays)flexDays=p.flexDays;
     if(p.skippedEx)skippedEx=p.skippedEx;
     if(p.swappedEx)swappedEx=p.swappedEx;
-    if(p.customPlan&&PLANS)PLANS['custom']=p.customPlan;
     return true;
   }catch(e){
     console.error('loadDraft failed:',e);
@@ -1716,6 +1733,31 @@ async function loadRecords(){
 // UTILS
 // ============================================================
 function getName(id){if(!plan)return id;for(const d of plan.days){const e=d.ex.find(x=>x.id===id);if(e)return e.name;}return id;}
+
+// Save and load the user's plan choice - dedicated persistent storage
+function savePlanChoice(){
+  if(!WHO||!planKey)return;
+  try{
+    const data={planKey};
+    if(planKey==='custom'&&PLANS['custom'])data.customPlan=PLANS['custom'];
+    localStorage.setItem('forge_plan_'+WHO, JSON.stringify(data));
+  }catch(e){}
+}
+
+function loadPlanChoice(){
+  try{
+    const d=localStorage.getItem('forge_plan_'+WHO);
+    if(!d)return false;
+    const p=JSON.parse(d);
+    if(p.customPlan)PLANS['custom']=p.customPlan;
+    if(p.planKey&&(PLANS[p.planKey]||p.customPlan)){
+      planKey=p.planKey;
+      plan=PLANS[planKey];
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
 
 function setSyncStatus(status){
   const el=document.getElementById('sync-status');
