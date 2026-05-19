@@ -509,7 +509,7 @@ body{background:var(--bg);color:var(--tx);font-family:var(--fb);min-height:100vh
         <div class="wk-bar" id="wk-bar">
           <div>
             <div class="wk-num" id="wk-num">WEEK 1</div>
-            <div style="font-family:var(--fm);font-size:8px;color:var(--mu);margin-top:2px">// AUTO-SYNCED TO CLOUD</div>
+            <div id="sync-status" style="font-family:var(--fm);font-size:8px;color:var(--mu);margin-top:2px">// READY</div>
           </div>
           <div class="wk-advance" onclick="openModal()">NEXT WEEK →</div>
         </div>
@@ -640,7 +640,7 @@ const USERS={
   emmerson:{pin:'0517',col:'#ff6bab',rgb:'255,107,171',boo:'george'}
 };
 
-let WHO=null,PIN='',week=1,plan=null,planKey=null,logData={},calcs={},prs={},completedDays={},flexDays={},skippedEx={},swappedEx={};
+let WHO=null,PIN='',week=1,plan=null,planKey=null,logData={},calcs={},prs={},completedDays={},flexDays={},skippedEx={},swappedEx={},activeDayIdx=0;
 let syncT=null;
 
 function go(u){
@@ -683,11 +683,17 @@ async function login(){
   setTheme(WHO);
   document.getElementById('user-pill').textContent=WHO.toUpperCase();
   nav('pg-app');
-  // Load localStorage FIRST - instant and reliable
-  const hadDraft=loadDraft();
-  if(!plan){planKey='3day';plan=PLANS['3day'];}
-  showWorkout(true);
-  // Then try to get newer data from cloud
+  // Step 1: load local draft instantly so something shows
+  loadDraft();
+  // Step 2: if we have a plan from draft, show it immediately
+  if(plan){
+    showWorkout(true);
+  } else {
+    // Default to 3day while cloud loads
+    planKey='3day';plan=PLANS['3day'];
+    showWorkout(true);
+  }
+  // Step 3: load from cloud - may override with user's actual saved plan
   try{
     await loadCloud();
   }catch(e){
@@ -809,6 +815,7 @@ function queueSync(){clearTimeout(syncT);syncT=setTimeout(doSync,800);}
 async function syncNow(){clearTimeout(syncT);await doSync();}
 async function doSync(){
   if(!WHO||!plan)return;
+  setSyncStatus('saving');
   try{
     // Save each exercise row individually to avoid bulk upsert issues
     const savePromises=[];
@@ -859,7 +866,8 @@ async function doSync(){
         updated_at:new Date().toISOString()
       })
     });
-    if(!pr.ok){const t=await pr.text();console.warn('Plan save failed:',t);}
+    if(!pr.ok){const t=await pr.text();console.warn('Plan save failed:',t);setSyncStatus('error');}
+    else{setSyncStatus('saved');}
   }catch(e){
     console.error('Sync failed:',e);
   }
@@ -1004,20 +1012,23 @@ function renderWorkout(autoSwitch){
   renderCompleteDayBtns();
   renderSwapSkipBtns();
   document.getElementById('sum-wrap').innerHTML='';
-  // Only auto-switch day on first load, not on every re-render
-  if(autoSwitch)autoSwitchDay();
+  if(autoSwitch){
+    autoSwitchDay();
+  } else {
+    // Restore previously active day — don't reset to day 1
+    const idx=Math.min(activeDayIdx,plan.days.length-1);
+    document.querySelectorAll('.dt').forEach((t,j)=>t.classList.toggle('on',j===idx));
+    document.querySelectorAll('.dpanel').forEach((p,j)=>p.classList.toggle('on',j===idx));
+  }
 }
 
 function autoSwitchDay(){
   if(!plan)return;
-  // Find first day that is NOT completed
   const nextIdx=plan.days.findIndex(d=>!completedDays[d.id]);
-  if(nextIdx>=0){
-    switchDay(nextIdx);
-  } else {
-    // All days done - stay on last day
-    switchDay(plan.days.length-1);
-  }
+  const idx=nextIdx>=0?nextIdx:plan.days.length-1;
+  activeDayIdx=idx;
+  document.querySelectorAll('.dt').forEach((t,j)=>t.classList.toggle('on',j===idx));
+  document.querySelectorAll('.dpanel').forEach((p,j)=>p.classList.toggle('on',j===idx));
 }
 
 
@@ -1125,17 +1136,30 @@ function restoreInputs(){
 }
 
 function onInp(did,exId,n,type){
+  // Get existing sets from logData as base (preserves data from other sets)
+  const existing=logData[exId]?.sets||[];
   const sets=[];
   for(let i=0;i<n;i++){
-    if(type==='w'){const w=parseFloat(document.getElementById('i-'+exId+'-'+i+'-w')?.value)||0;const r=parseInt(document.getElementById('i-'+exId+'-'+i+'-r')?.value)||0;sets.push({w,r});}
-    else{const r=parseInt(document.getElementById('i-'+exId+'-'+i+'-r')?.value)||0;sets.push({r});}
+    if(type==='w'){
+      const wEl=document.getElementById('i-'+exId+'-'+i+'-w');
+      const rEl=document.getElementById('i-'+exId+'-'+i+'-r');
+      // Use DOM value if input exists, otherwise keep existing saved value
+      const w=wEl?(parseFloat(wEl.value)||0):(existing[i]?.w||0);
+      const r=rEl?(parseInt(rEl.value)||0):(existing[i]?.r||0);
+      sets.push({w,r});
+    } else {
+      const rEl=document.getElementById('i-'+exId+'-'+i+'-r');
+      const r=rEl?(parseInt(rEl.value)||0):(existing[i]?.r||0);
+      sets.push({r});
+    }
   }
   if(!logData[exId])logData[exId]={};
   logData[exId].sets=sets;
-  // Save to localStorage IMMEDIATELY - this is the primary store
+  // Save to localStorage IMMEDIATELY
   saveDraft();
+  setSyncStatus('local');
   updateProg(did,exId,n,type);
-  // Queue cloud sync as backup
+  // Queue cloud sync
   queueSync();
 }
 
@@ -1384,9 +1408,11 @@ async function completeDay(dayId, dayName){
   renderSwapSkipBtns();
   
   if(failed===0){
-    alert(dayName.toUpperCase()+' COMPLETED AND SAVED ✓');
+    setSyncStatus('saved');
+    alert(dayName.toUpperCase()+' COMPLETED AND SAVED TO CLOUD ✓\nAll '+results.length+' exercises saved.');
   } else {
-    alert(dayName.toUpperCase()+' COMPLETED — '+failed+' exercises failed to save. Check connection.');
+    setSyncStatus('error');
+    alert(dayName.toUpperCase()+' COMPLETED\nWARNING: '+failed+' of '+results.length+' exercises failed to save to cloud.\nData is saved on this device. Tap the orange status bar to retry.');
   }
 }
 
@@ -1690,6 +1716,27 @@ async function loadRecords(){
 // UTILS
 // ============================================================
 function getName(id){if(!plan)return id;for(const d of plan.days){const e=d.ex.find(x=>x.id===id);if(e)return e.name;}return id;}
+
+function setSyncStatus(status){
+  const el=document.getElementById('sync-status');
+  if(!el)return;
+  if(status==='saving'){
+    el.textContent='// SAVING...';
+    el.style.color='var(--m2)';
+  } else if(status==='saved'){
+    el.textContent='// SAVED TO CLOUD ✓';
+    el.style.color='var(--ucol)';
+    setTimeout(()=>{el.textContent='// AUTO-SYNCED TO CLOUD';el.style.color='var(--mu)';},3000);
+  } else if(status==='local'){
+    el.textContent='// SAVED LOCALLY ⚠ NOT SYNCED';
+    el.style.color='var(--or)';
+  } else if(status==='error'){
+    el.textContent='// SYNC FAILED — TAP TO RETRY';
+    el.style.color='var(--re)';
+    el.style.cursor='pointer';
+    el.onclick=()=>syncNow();
+  }
+}
 
 function getLastWeekTarget(exId){
   // Check current week's calc results first (from this session)
