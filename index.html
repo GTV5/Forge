@@ -1194,11 +1194,11 @@ function buildExCard(ex,ei,day){
   const grid=bw
     ?`<div class="inp-grid g2">
         <div class="inp-lbl">SET</div><div class="inp-lbl">REPS</div>
-        ${Array.from({length:ex.sets},(_,si)=>`<div class="inp-num">${si+1}</div><input class="inp" type="number" min="0" placeholder="0" id="i-${ex.id}-${si}-r" oninput="onInp('${day.id}','${ex.id}',${ex.sets},'bw')">`).join('')}
+        ${Array.from({length:ex.sets},(_,si)=>`<div class="inp-num">${si+1}</div><input class="inp" type="number" min="0" inputmode="numeric" placeholder="0" id="i-${ex.id}-${si}-r" oninput="onInp('${day.id}','${ex.id}',${si},'r')">`).join('')}
       </div>`
     :`<div class="inp-grid g3">
         <div class="inp-lbl">SET</div><div class="inp-lbl">LBS</div><div class="inp-lbl">REPS</div>
-        ${Array.from({length:ex.sets},(_,si)=>`<div class="inp-num">${si+1}</div><input class="inp" type="number" min="0" step="2.5" placeholder="0" id="i-${ex.id}-${si}-w" oninput="onInp('${day.id}','${ex.id}',${ex.sets},'w')"><input class="inp" type="number" min="0" placeholder="0" id="i-${ex.id}-${si}-r" oninput="onInp('${day.id}','${ex.id}',${ex.sets},'w')">`).join('')}
+        ${Array.from({length:ex.sets},(_,si)=>`<div class="inp-num">${si+1}</div><input class="inp" type="number" min="0" step="2.5" inputmode="decimal" placeholder="0" id="i-${ex.id}-${si}-w" oninput="onInp('${day.id}','${ex.id}',${si},'w')"><input class="inp" type="number" min="0" inputmode="numeric" placeholder="0" id="i-${ex.id}-${si}-r" oninput="onInp('${day.id}','${ex.id}',${si},'r')">`).join('')}
       </div>`;
   const cr=calcs[ex.id];
   const pr=prs[ex.id];
@@ -1244,38 +1244,52 @@ function restoreInputs(){
   }));
 }
 
-function onInp(did,exId,n,type){
-  // Initialize sets array from existing data first
+function onInp(did,exId,setIdx,field){
+  // Get the element that fired
+  const el=document.getElementById('i-'+exId+'-'+setIdx+'-'+field);
+  if(!el)return;
+  
+  // Parse value
+  const val=field==='w'?(parseFloat(el.value)||0):(parseInt(el.value)||0);
+  
+  // Get exercise to know total sets
+  let numSets=4,exType='w';
+  if(plan){
+    plan.days.forEach(d=>{
+      const exList=(flexDays&&flexDays[d.id])?flexDays[d.id].ex:d.ex;
+      const ex=exList&&exList.find(e=>e.id===exId);
+      if(ex){const ae=swappedEx&&swappedEx[ex.id]?{...swappedEx[ex.id],id:ex.id}:ex;numSets=ae.sets||4;exType=ae.type||'w';}
+    });
+  }
+  
+  // Initialize logData for this exercise if needed
   if(!logData[exId])logData[exId]={sets:[]};
-  if(!logData[exId].sets||logData[exId].sets.length!==n){
-    // Initialize with zeros for all sets
-    logData[exId].sets=Array.from({length:n},(_,i)=>
-      type==='w'?{w:0,r:0}:{r:0}
-    );
+  if(!Array.isArray(logData[exId].sets))logData[exId].sets=[];
+  
+  // Extend array to fit this set index
+  while(logData[exId].sets.length<=setIdx){
+    logData[exId].sets.push(exType==='w'?{w:0,r:0}:{r:0});
   }
   
-  // Now read ALL inputs from DOM and merge with existing saved values
-  for(let i=0;i<n;i++){
-    if(type==='w'){
-      const wEl=document.getElementById('i-'+exId+'-'+i+'-w');
-      const rEl=document.getElementById('i-'+exId+'-'+i+'-r');
-      // Only update if input has a value - keep existing if empty
-      if(wEl&&wEl.value!=='')logData[exId].sets[i].w=parseFloat(wEl.value)||0;
-      if(rEl&&rEl.value!=='')logData[exId].sets[i].r=parseInt(rEl.value)||0;
-    } else {
-      const rEl=document.getElementById('i-'+exId+'-'+i+'-r');
-      if(rEl&&rEl.value!=='')logData[exId].sets[i].r=parseInt(rEl.value)||0;
-    }
+  // Update ONLY this specific field of this specific set
+  if(field==='w'){
+    logData[exId].sets[setIdx].w=val;
+  } else {
+    logData[exId].sets[setIdx].r=val;
   }
   
-  // Save to localStorage IMMEDIATELY
+  // Update the progress dot
+  updateDot(did,exId);
+  
+  // Save immediately to localStorage
   saveDraft();
-  setSyncStatus('local');
-  updateProg(did,exId,n,type);
+  
   // Queue cloud sync
-  queueSync();
+  clearTimeout(syncT);
+  syncT=setTimeout(doSync,800);
 }
 
+function saveLocal(){saveDraft();}
 function saveDraft(){
   try{
     const data={logData,calcs,prs,week,planKey,completedDays,flexDays,skippedEx,swappedEx};
@@ -1328,6 +1342,7 @@ function loadDraft(){
   }
 }
 
+function updateDot(did,exId){const ex=getExById?getExById(exId):null;updateProg(did,exId,ex?ex.sets:4,ex?ex.type:'w');}
 function updateProg(did,exId,n,type){
   const ex=plan.days.find(d=>d.id===did)?.ex.find(e=>e.id===exId);if(!ex)return;
   const dd=dotDone(ex);
@@ -2762,6 +2777,15 @@ function unskipEx(exId){
   delete skippedEx[exId];
   saveDraft();
   renderWorkout(false);
+}
+function getExById(exId){
+  if(!plan)return null;
+  for(const d of plan.days){
+    const exList=flexedDays[d.id]?flexedDays[d.id].ex:d.ex;
+    const ex=exList?exList.find(e=>e.id===exId):null;
+    if(ex)return swappedEx[exId]?{...swappedEx[exId],id:exId}:ex;
+  }
+  return null;
 }
 </script>
 
